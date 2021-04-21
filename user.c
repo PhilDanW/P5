@@ -1,3 +1,8 @@
+/*********************************************************
+* Author: Philip Wright                                  *
+* Project 5                                              *
+* Date: April 20, 2021
+**********************************************************/
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -27,10 +32,6 @@
 #define FLAGS (O_CREAT | O_EXCL)
 
 static volatile sig_atomic_t childDoneFlag = 0;
-
-// static void setdoneflag(int signo){
-// 	childDoneFlag = 1;
-// }
 
 typedef struct {
 	int seconds;
@@ -79,17 +80,12 @@ int main (int argc, char *argv[]){
 	sigHandling();
 	initPCBStructures();
 
-    // printf("Child process enterred: %d\n", pid);
-
 	while(!childDoneFlag){
 			randomActionTaken = rand() % 100;
-			// printf("Child %d randomly selects the action %d\n", pid, randomActionTaken);
-
 			// child terminates
 			if(randomActionTaken < TERMCONSTANT){
 				childDoneFlag = 1;
 				//send termination status to parent to deallocated resources
-				// printf("\nChild %d terminated!\n\n", pid);
 				toParentMsg->mtype = 1;
 				toParentMsg->pid = pid;
 				toParentMsg->msg = 0;
@@ -98,14 +94,13 @@ int main (int argc, char *argv[]){
 					allocatedResources->resourcesUsed[randomResourceChoice] += 1;
 				}
 
-				//request resource
+			//request resource
 			} else if (randomActionTaken >= TERMCONSTANT && randomActionTaken < REQUESTCONSTANT){
 				randomResourceChoice = rand() % 20;
 				if ((allocatedResources->resourcesUsed[randomResourceChoice]) < (maxResources->resourcesUsed[randomResourceChoice]) && allocatedResources->resourcesUsed[randomResourceChoice] < 1){
 					toParentMsg->mtype = 3;
 					toParentMsg->pid = pid;
 					toParentMsg->msg = randomResourceChoice;
-					// printf("Child %d asks for resource %d\n", pid, randomResourceChoice);
 					msgsnd(queueid, toParentMsg, lenOfMessage, 3);
 					if (msgrcv(queueid, toParentMsg, lenOfMessage, pid, 0) != -1){
 						allocatedResources->resourcesUsed[randomResourceChoice] += 1;
@@ -113,7 +108,7 @@ int main (int argc, char *argv[]){
 					}
 
 				}
-				// release randomly selected resource
+			// release randomly selected resource
 			} else {
 				if(resCount > 0){
 					resIndex = 0;
@@ -121,20 +116,15 @@ int main (int argc, char *argv[]){
 					for(i = 0; i < 20; i++){
 						if(allocatedResources->resourcesUsed[i] > 0){
 							if (resIndex == randomResourceChoice){
-								// printf("Child %d deallocates resource %d resource count: %d\n", pid, i, resCount);
-
 								toParentMsg->mtype = 2;
 								toParentMsg->pid = pid;
 								toParentMsg->msg = i;
-								// printf("Child %d asks to dealocate resource %d\n", pid, randomResourceChoice);
 								msgsnd(queueid, toParentMsg, lenOfMessage, 2);
 								if (msgrcv(queueid, toParentMsg, lenOfMessage, pid, 0) != -1){
 									allocatedResources->resourcesUsed[i] -= 1;
 									resCount -= 1;
 									i = 20;
-
 								}
-								
 							} else {
 								resIndex += 1;
 							}
@@ -142,31 +132,22 @@ int main (int argc, char *argv[]){
 					}
 				}	
 			}
-
-
-
-		
-			// printf("Child %d reads clock   %d : %d\n", pid, sharedClock->seconds, sharedClock->nanosecs);
+			
 			if(sharedClock->seconds >= 1000){
 				childDoneFlag = 1;
 			}
-		
 	}
-
 	
-	// msgrcv(queueid, toParentMsg, lenOfMessage, 1, 0);
-	// printf("Received message in child %d: %d\n", pid, ctopMsg->msg);
-
 	printf("End of child %d: [", pid);
 	for (i = 0; i < 20; i++){
 		printf("%d,", allocatedResources->resourcesUsed[i]);
 	}
 	printf("]\n");
 	exit(1);
+	
 	return 1;
-
-
 }
+
 int initPCBStructures(){
 	// init clock
 	shmclock = shmget(SHMCLOCKKEY, sizeof(clockStruct), 0666 | IPC_CREAT);
@@ -186,7 +167,6 @@ int initPCBStructures(){
 		allocatedResources->resourcesUsed[r] = 0;
 	}
 
-
 	//queues
 	queueid = msgget(MSGQUEUEKEY, PERMS | IPC_CREAT);
 	if (queueid == -1){
@@ -196,10 +176,7 @@ int initPCBStructures(){
 	// init to message struct 
 	toParentMsg = malloc(sizeof(mymsg_t));
 	lenOfMessage = sizeof(mymsg_t) - sizeof(long);
-
 	
-
-
 	return 0;
 }
 
@@ -234,12 +211,9 @@ int sigHandling(){
 		return -1;
 	}
 
-
 	return 1;
 }
 
 static void endChild(int signo){
 		childDoneFlag = 1;
-		
-
 }
