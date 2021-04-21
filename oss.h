@@ -1,17 +1,26 @@
+/*********************************************************
+* Author: Philip Wright                                  *
+* Project 5                                              *
+* Date: April 20, 2021
+**********************************************************/
+//structure of the nodes of thee PCB
 typedef struct node {
     struct node *next;
     struct pcb *head; 
 } Queue;
 
+//struct for the shared and fork clocks
 typedef struct {
 	int seconds;
 	int nanosecs;
 } clockStruct;
 
+//struct fot the resources to be used
 typedef struct {
 	int resourcesUsed[20];
 } resourceStruct;
 
+//struct for the process control block
 typedef struct pcb {
 	int pid;
 	int requestedResource;
@@ -21,12 +30,14 @@ typedef struct pcb {
 	resourceStruct *resUsed;
 } PCB;
 
+//struct for message
 typedef struct {
 	long mtype;
 	pid_t pid;
 	int res;
 } mymsg_t;
 
+//all function definitions
 int sigHandling();
 
 static void endAllProcesses(int signo);
