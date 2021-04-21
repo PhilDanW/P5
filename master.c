@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #include <time.h>
 
-#include "oss.h"
+#include "master.h"
 
 #define SHMCLOCKKEY	86868            /* Parent and child agree on common key for clock.*/
 #define MSGQUEUEKEY	68686            /* Parent and child agree on common key for msgqueue.*/
