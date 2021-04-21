@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #include <time.h>
 
-#include "master.h"
+#include "oss.h"
 
 #define SHMCLOCKKEY	86868            /* Parent and child agree on common key for clock.*/
 #define MSGQUEUEKEY	68686            /* Parent and child agree on common key for msgqueue.*/
@@ -32,7 +32,6 @@ Queue *lastInProcessList;
 
 //globals
 static volatile sig_atomic_t doneflag = 0;
-
 static clockStruct *sharedClock;
 static clockStruct *forkTime;
 static resourceStruct *maxResources;
@@ -41,6 +40,7 @@ static resourceStruct *availableResources;
 static mymsg_t *toParentMsg;
 static int queueid;
 
+//other necessary variables
 int randForkTime;
 int maxResourceSegment;
 int childCounter;
@@ -52,6 +52,7 @@ int deadlockFunctionCount;
 
 int main (int argc, char *argv[]){
 
+	//setup output log file
 	FILE *logfile;
 	logfile = fopen("logfile", "w");
 
@@ -60,6 +61,7 @@ int main (int argc, char *argv[]){
 	Queue * tmpPtr;
 	Queue * prevTmpPtr;
 
+	//initialize all variables
 	tmpPtr = NULL;
 	prevTmpPtr = NULL;
 
@@ -81,21 +83,20 @@ int main (int argc, char *argv[]){
     requestsGranted = 0;
 	deadlockFunctionCount = 0;
 
-
+	//initialize signal handling, process control blocks and the signal for if the time limit is reached
 	sigHandling();
 	initPCBStructures();
-
 	alarm(timeLimit);
 
-	// init message struct 
+	// initialize the message struct 
 	toParentMsg = malloc(sizeof(mymsg_t));
 	lenOfMessage = sizeof(mymsg_t) - sizeof(long);
 
-	//init allocated resources
+	//initialize allocated resources
 	allocatedResources = malloc(sizeof(resourceStruct));
 	availableResources = malloc(sizeof(resourceStruct));
 
-	// init both resource structs' resource elements
+	// initialize both resource structs' resource elements
 	int i;
 	for (i = 0; i < 20; i++){
 		maxResources->resourcesUsed[i] = (rand() % 9) + 1;
@@ -104,32 +105,36 @@ int main (int argc, char *argv[]){
 		printf("Available resources [%d]: %d\n", i, availableResources->resourcesUsed[i]);
 	}
 	
+	//set the timer
 	setForkTimer();
 	
+	//the main loop of the oss, which will go exec the user.c executable for the user process portion
 	while(!doneflag){
 		if(childCounter < childLimit && checkIfTimeToFork() == 1){
 
+			//execlp ./user
 			if ((childPid = fork()) == 0){
-				execlp("./worker", "./worker", (char*)NULL);
-
-				fprintf(stderr, "%sFailed exec worker!\n", argv[0]);
+				execlp("./user", "./user", (char*)NULL);
+				fprintf(stderr, "%sFailed to exec user process!\n", argv[0]);
 				_exit(1);
 			}	
 
+			//if the processing list is empty add the pid to the queue
 			if (firstInProcessList == NULL){
 				firstInProcessList = newProcessMember(childPid);
 				lastInProcessList = firstInProcessList;
+			//else add it to the end of the queue	
 			} else {
 				lastInProcessList = lastInProcessList->next = newProcessMember(childPid);
 			}
 
 			totalChildren  += 1;
 			childCounter += 1;
-			printf("Process %d created at %d:%d\n", childPid, sharedClock->seconds, sharedClock->nanosecs);
+			printf("Process %d was created at %d:%d\n", childPid, sharedClock->seconds, sharedClock->nanosecs);
 			setForkTimer();
 		}	
 
-		// child terminating
+		//if a child process is terminating
 		if(msgrcv(queueid, toParentMsg, lenOfMessage, 1, IPC_NOWAIT) != -1){
 			deleteFromProcessList(toParentMsg->pid, firstInProcessList);
 
@@ -137,18 +142,17 @@ int main (int argc, char *argv[]){
 			msgsnd(queueid, toParentMsg, lenOfMessage, 0);
 		}
 
-		// child requests resource
+		//if a child process requests resources
 		if(msgrcv(queueid, toParentMsg, lenOfMessage, 3, IPC_NOWAIT) != -1){
 			if(verbose == 1 && totalLinecount <= 100000){
 				fprintf(logfile, "Master has detected Process P%d requesting R%d at time %d:%d\n", toParentMsg->pid, toParentMsg->res, sharedClock->seconds, sharedClock->nanosecs);
 				totalLinecount += 1;
 			}
 
-
 			deadlockFunctionCount += 1;
 			if (bankersAlgorithm(toParentMsg->res, findPCB(toParentMsg->pid, firstInProcessList)) == 1){
 				if(verbose == 1 && totalLinecount <= 100000){
-					fprintf(logfile, "Master granting P%d request R%d at time %d:%d\n", toParentMsg->pid, toParentMsg->res, sharedClock->seconds, sharedClock->nanosecs);
+					fprintf(logfile, "Master granting Process P%d request R%d at time %d:%d\n", toParentMsg->pid, toParentMsg->res, sharedClock->seconds, sharedClock->nanosecs);
 					if(deadlockFunctionCount % 20 == 0){
 						int o; 
 						int n = 0;
@@ -180,7 +184,7 @@ int main (int argc, char *argv[]){
 				// printf("\nRESOURCE GRANTED! %d for %d\n", toParentMsg->res, toParentMsg->pid);
 				msgsnd(queueid, toParentMsg, lenOfMessage, 0);
 			} else {
-				fprintf(logfile, "Process P%d blocked!\n", toParentMsg->pid);
+				fprintf(logfile, "Process P%d has been blocked!\n", toParentMsg->pid);
 				totalLinecount += 1;
 				
 				// put in blocked queue
@@ -219,8 +223,6 @@ int main (int argc, char *argv[]){
 			tmpRes = tmpPtr->head->requestedResource;
 			
 			if ((allocatedResources->resourcesUsed[tmpRes]) < (maxResources->resourcesUsed[tmpRes])){
-				// printf("\n\n\n\n\nTEMPORARY RESOURCE: %d  child:  %d\n\n\n\n\n", tmpRes, tmpPtr->head->pid);
-			
 				if(tmpPtr == prevTmpPtr){
 					firstInBlockedQueue = tmpPtr->next;
 				} else {
@@ -230,16 +232,11 @@ int main (int argc, char *argv[]){
 
 						prevTmpPtr->next = tmpPtr->next;	
 				}
-				// printf("\nUNBLOCKED RESOURCE! pid: %d resource: %d\n\n", tmpPtr->head->pid, tmpRes);
-				fprintf(logfile, "Process P%d unblocked!\n", tmpPtr->head->pid);
+				fprintf(logfile, "Process P%d has been unblocked!\n", tmpPtr->head->pid);
 				totalLinecount += 1;
 				allocatedResources->resourcesUsed[tmpRes] += 1;
 				availableResources->resourcesUsed[tmpRes] -= 1;
 				findPCB(tmpPtr->head->pid, firstInProcessList)->resUsed->resourcesUsed[tmpRes] += 1;
-
-
-
-
 
 				toParentMsg->mtype = tmpPtr->head->pid;
 				msgsnd(queueid, toParentMsg, lenOfMessage, 0);
@@ -251,14 +248,9 @@ int main (int argc, char *argv[]){
 				}
 
 				tmpPtr = tmpPtr->next;
-				if (tmpPtr != NULL){
-					// printf("tmp%d\n", tmpPtr->head->pid);
-				}
 			}
 		}
 
-
-        // printf("Parent %d : %d\n", sharedClock->seconds, sharedClock->nanosecs);
          sharedClock->nanosecs += 1000000;
             if (sharedClock->nanosecs >= 1000000000){
                 sharedClock->seconds += 1;
@@ -279,52 +271,21 @@ int main (int argc, char *argv[]){
     				// totalChildren  += 1;
 
     	printf("Child count: %d\n", childCounter);
-    	sleep(2);
+	//sleep for 2 seconds
+    	sleep(5);
 
     }
 
-
-
-    printf("Final Clock time is at %d:%d\n", sharedClock->seconds, sharedClock->nanosecs);
-
-    // printf("Process List: \n");
-    // printQueue(firstInProcessList);
-
-    // printf("\nBlocked Queue: \n");
-    // printQueue(firstInBlockedQueue);
-
+    	printf("Final Clock time is at %d:%d\n", sharedClock->seconds, sharedClock->nanosecs);
 	printf("Final total process count: %d\n", totalChildren);
-
-	// printf("\nAvailable: \n[");
-	// int n;
-	// for(n = 0; n < 20; n++){
-	// 	printf("%d,", availableResources->resourcesUsed[n]);
-	// }
-	// printf("]\nAllocated: \n[");
-	// for(n = 0; n < 20; n++){
-	// 	printf("%d,", allocatedResources->resourcesUsed[n]);
-	// }
-	// printf("]\nMax: \n[");
-	// for(n = 0; n < 20; n++){
-	// 	printf("%d,", maxResources->resourcesUsed[n]);
-	// }
-	// printf("]\n\n\n\n\n\n\n");
-
 	printf("Total Requests: %d\n", deadlockFunctionCount);
 	printf("Requests granted: %d\n", requestsGranted);
-
-
-
 	printf("Percentage of requests granted: %f\n", (float)requestsGranted/(float)deadlockFunctionCount*100);
 
 	tearDown();
 
-
-	return 0;
-
 	fclose(logfile);
-
-
+	return 0;
 }
 
 int sigHandling(){
@@ -366,42 +327,31 @@ int sigHandling(){
 	return 1;
 }
 
+//end all processes
 static void endAllProcesses(int signo){
 	doneflag = 1;
 	if(signo == SIGALRM){
-		// printf("\nAvailable: \n[");
-		// int n;
-		// for(n = 0; n < 20; n++){
-		// 	printf("%d,", availableResources->resourcesUsed[n]);
-		// }
-		// printf("]\nAllocated: \n[");
-		// for(n = 0; n < 20; n++){
-		// 	printf("%d,", allocatedResources->resourcesUsed[n]);
-		// }
-
-		// printf("]\nMax: \n[");
-		// for(n = 0; n < 20; n++){
-		// 	printf("%d,", maxResources->resourcesUsed[n]);
-		// }
-		// printf("]\n\n\n\n\nKILLING ALL PROCESSES!!!!!\n\n\n\n\n\n");
+		printf("\nKILLING ALL PROCESSES\n");
 		killpg(getpgid(getpid()), SIGINT);
 	}
 }
 
+//determine if a child is finished processing
 static void childFinished(int signo){
 	pid_t finishedpid;
 	while((finishedpid = waitpid(-1, NULL, WNOHANG))){
 		if((finishedpid == -1) && (errno != EINTR)){
 			break;
 		} else {
-			printf("Child %d finished!\n", finishedpid);
+			printf("Child %d is done!\n", finishedpid);
 			childCounter -= 1;
 		}
 	}
 }
 
+//set up the structs of the process control block
 int initPCBStructures(){
-	// init clock
+	// initialize clock
 	shmclock = shmget(SHMCLOCKKEY, sizeof(clockStruct), 0666 | IPC_CREAT);
 	sharedClock = (clockStruct *)shmat(shmclock, NULL, 0);
 	if (shmclock == -1){
@@ -411,10 +361,10 @@ int initPCBStructures(){
 	sharedClock -> seconds = 0;
 	sharedClock -> nanosecs = 0;
 
-	// determines when to fork new child process
+	//determine when to fork new child process
 	forkTime = malloc(sizeof(clockStruct));
 
-	//int resources
+	//intialize resources
 	maxResourceSegment = shmget(MAXRESOURCEKEY, (sizeof(resourceStruct) + 1), 0666 | IPC_CREAT);
 	maxResources = (resourceStruct *)shmat(maxResourceSegment, NULL, 0);
 	if (maxResourceSegment == -1){
@@ -430,6 +380,7 @@ int initPCBStructures(){
 	return 0;
 }
 
+//tear down and clean up the shared clock, resources, and queue IDs
 void tearDown(){
 	shmdt(sharedClock);
 	shmctl(shmclock, IPC_RMID, NULL);
@@ -438,6 +389,7 @@ void tearDown(){
 	msgctl(queueid, IPC_RMID, NULL);
 }
 
+//initialize the attributes of a new member added to process queue
 Queue *newProcessMember(int pid)
 {
     Queue *newQ;
@@ -448,6 +400,8 @@ Queue *newProcessMember(int pid)
     
     return newQ;
 }
+
+//initialize new member of the blocked queue
 Queue *newBlockedQueueMember(PCB *pcb)
 {
     Queue *newQ;
@@ -459,17 +413,17 @@ Queue *newBlockedQueueMember(PCB *pcb)
     return newQ;
 }
 
+//remove a process from the list
 void deleteFromProcessList(int pidToDelete, Queue *ptr){
-	//case of first element in queue
+	//if the process to be deleted if the first in the queue
 	if (ptr->head->pid == pidToDelete){
-		// printf("RESOURCES RELEASED! from %d\n", ptr->head->pid);
 		releaseAllResources(ptr->head->resUsed);
+		//assign next in line to the head of the queue
 		firstInProcessList = ptr->next;
 		return;
 	} else {
 		while(ptr != NULL){
 			if (ptr->next->head->pid == pidToDelete){
-				// printf("RESOURCES RELEASED! from %d\n", ptr->next->head->pid);
 				releaseAllResources(ptr->next->head->resUsed);
 				ptr->next = ptr->next->next;
 				if(ptr->next == NULL){
@@ -483,6 +437,7 @@ void deleteFromProcessList(int pidToDelete, Queue *ptr){
 	}
 }
 
+//print the queue to the screen
 void printQueue(Queue * ptr){
 	while(ptr != NULL){
 		printf("Pid: %d\n", ptr->head->pid);
@@ -500,6 +455,7 @@ void printQueue(Queue * ptr){
 	}
 }
 
+//initialize process control block
 PCB *newPCB(int pid){
 	PCB *newP;
 	newP = malloc(sizeof(PCB));
@@ -517,6 +473,7 @@ PCB *newPCB(int pid){
 	return newP;
 }
 
+//locate a specific process control block by the pointer head
 PCB *findPCB(int pid, Queue * ptrHead){
 	while(ptrHead != NULL){
 		if(ptrHead->head->pid == pid){
@@ -528,8 +485,9 @@ PCB *findPCB(int pid, Queue * ptrHead){
 	return NULL;
 }
 
+//checks to see if a process is allowed to fork
+//if the shared clock nano/seconds is greater than or equal to fork time, then its time to fork!
 int checkIfTimeToFork(){
-	
 	if ((sharedClock->nanosecs >= forkTime->nanosecs) && (sharedClock->seconds >= forkTime->seconds)){
 		return 1;
 	} else {
@@ -540,6 +498,7 @@ int checkIfTimeToFork(){
 	}
 }
 
+//sets up the fork timer
 void setForkTimer(){
 	randForkTime = (rand() % 500) * 1000000;
 
@@ -588,6 +547,7 @@ int bankersAlgorithm(int res, PCB * proc){
 
 }
 
+//clean up all available and allocated resources
 void releaseAllResources(resourceStruct * res){
 
 	int r;
