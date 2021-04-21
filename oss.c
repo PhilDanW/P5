@@ -1,3 +1,8 @@
+/*********************************************************
+* Author: Philip Wright                                  *
+* Project 5                                              *
+* Date: April 20, 2021
+**********************************************************/
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
